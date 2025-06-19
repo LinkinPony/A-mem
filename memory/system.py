@@ -63,6 +63,7 @@ class AgenticMemorySystem:
             api_key: API key for the LLM service
             db_path: Path to the database directory (Optional)
         """
+        print("Initializing AgenticMemorySystem...")
         self.memories: Dict[str, MemoryNote] = {}
         self.model_name = model_name
         self.db_path = db_path
@@ -70,10 +71,12 @@ class AgenticMemorySystem:
         if self.db_path is None:
             self.db_path = "./chroma_db"
             logger.warning(f"No database path provided. Using default path: {self.db_path}")
+        print(f"DB path: {self.db_path}")
 
         self.retriever = ChromaRetriever(collection_name="memories", model_name=self.model_name,
                                          db_path=self.db_path)
-
+        print(f"Finish chroma retriever initialization")
+        print(f"Initializing memory system with model: {self.model_name}")
         # Create and inject LLMInteractionLogger
         llm_interaction_logger_instance = LLMInteractionLogger() # Instantiate the logger
 
