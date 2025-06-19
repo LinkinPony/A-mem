@@ -26,7 +26,8 @@ class OpenAIController(BaseLLMController):
 
     def __init__(self, model: str = "gpt-4", api_key: Optional[str] = None):
         try:
-            from openai import OpenAI
+            from openai import OpenAI, APIError # Import APIError
+            self.openai_APIError = APIError # Store it for use in get_completion
             self.model = model
             if api_key is None:
                 api_key = os.getenv('OPENAI_API_KEY')
@@ -38,18 +39,23 @@ class OpenAIController(BaseLLMController):
 
     def get_completion(self, prompt: str, response_format: dict = None, temperature: float = 0.7) -> str:
         """使用 OpenAI 的 Chat Completions API 获取补全。"""
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=[  # type: ignore
-                {"role": "system", "content": "You must respond with a JSON object."},
-                {"role": "user", "content": prompt}
-            ],
-            response_format=response_format,  # type: ignore
-            temperature=temperature,
-            max_tokens=1000
-        )
-        # response.choices[0].message.content 在新版 openai-python 中可能为 None
-        return response.choices[0].message.content or ""
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[  # type: ignore
+                    {"role": "system", "content": "You must respond with a JSON object."},
+                    {"role": "user", "content": prompt}
+                ],
+                response_format=response_format,  # type: ignore
+                temperature=temperature,
+                max_tokens=1000
+            )
+            # response.choices[0].message.content 在新版 openai-python 中可能为 None
+            return response.choices[0].message.content or ""
+        except self.openai_APIError as e: # Catch OpenAI API errors
+            return f"OpenAI API Error: {str(e)}"
+        except Exception as e: # Catch any other unexpected errors
+            return f"OpenAI Unexpected Error: {str(e)}"
 
 
 class OllamaController(BaseLLMController):
@@ -58,33 +64,8 @@ class OllamaController(BaseLLMController):
     def __init__(self, model: str = "llama2"):
         self.model = model
 
-    def _generate_empty_value(self, schema_type: str) -> Any:
-        """根据 JSON schema 类型生成一个空的默认值。"""
-        if schema_type == "array":
-            return []
-        elif schema_type == "string":
-            return ""
-        elif schema_type == "object":
-            return {}
-        elif schema_type == "number":
-            return 0
-        elif schema_type == "boolean":
-            return False
-        return None
-
-    def _generate_empty_response(self, response_format: dict) -> dict:
-        """当 API 调用失败时，根据 schema 生成一个空的 JSON 响应。"""
-        if not response_format or "json_schema" not in response_format:
-            return {}
-
-        schema = response_format["json_schema"].get("schema", {})
-        result = {}
-
-        if "properties" in schema:
-            for prop_name, prop_schema in schema["properties"].items():
-                result[prop_name] = self._generate_empty_value(prop_schema.get("type", ""))
-
-        return result
+    # _generate_empty_value and _generate_empty_response are no longer needed
+    # as get_completion will now return an error string directly.
 
     def get_completion(self, prompt: str, response_format: dict = None, temperature: float = 0.7) -> str:
         """使用 litellm 与 Ollama 模型进行交互。"""
@@ -100,10 +81,9 @@ class OllamaController(BaseLLMController):
             )
             return response.choices[0].message.content or ""
         # pylint: disable=broad-exception-caught
-        except Exception:
-            # 如果 litellm/Ollama 调用失败，返回一个基于 schema 的空 JSON 字符串
-            empty_response = self._generate_empty_response(response_format)
-            return json.dumps(empty_response)
+        except Exception as e: # Catch any exception
+            # 如果 litellm/Ollama 调用失败，返回错误信息字符串
+            return f"Ollama API Error: {str(e)}"
 
 
 class GeminiController(BaseLLMController):
@@ -155,14 +135,12 @@ class GeminiController(BaseLLMController):
 
         # 根据新 SDK 文档，使用 errors.APIError
         except (genai.errors.APIError, ValueError) as e: # Corrected access to errors
-            if response_format and response_format.get("type") in ["json_schema", "json_object"]:
-                return "{}"  # 对于 JSON 请求，在出错时返回空对象
-            return f"Error generating content with Gemini: {str(e)}"
+            # Always return the error string, regardless of response_format
+            return f"Gemini API Error: {str(e)}" # Made message more consistent
         # pylint: disable=broad-exception-caught
         except Exception as e:
-            if response_format and response_format.get("type") in ["json_schema", "json_object"]:
-                return "{}"
-            return f"Unexpected error with Gemini: {str(e)}"
+            # Always return the error string, regardless of response_format
+            return f"Gemini Unexpected Error: {str(e)}" # Made message more consistent
 
 
 class LLMController:
@@ -186,11 +164,14 @@ class LLMController:
 
     def get_completion(self, prompt: str, response_format: dict = None, temperature: float = 0.7, stage: Optional[str] = None) -> str: # Added stage parameter
         """根据所选后端获取 LLM 补全。"""
+        if self.logger and stage:
+            self.logger.log(stage=stage, prompt=prompt) # Pre-request logging
+
         # The actual call to the specific LLM backend (OpenAI, Ollama, Gemini)
         # should NOT pass the 'stage' parameter. Their get_completion methods remain unchanged.
         response = self.llm.get_completion(prompt, response_format=response_format, temperature=temperature)
 
         if self.logger and stage:
-            self.logger.log(stage=stage, prompt=prompt, response=response)
+            self.logger.log(stage=stage, prompt=prompt, response=response) # Post-response logging
 
         return response

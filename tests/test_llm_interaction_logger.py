@@ -31,7 +31,16 @@ class TestLLMInteractionLogger(unittest.TestCase):
         # It's important that LLMInteractionLogger reads "config.ini", not "test_config.ini" directly
         # So we will rename our test_config.ini to config.ini before logger instantiation
         if os.path.exists("config.ini"):
-            os.rename("config.ini", "config.ini.bak") # Backup existing config.ini
+            # If config.ini.bak exists, it means a previous test run might have failed
+            # during or after renaming config.ini.bak to config.ini, but before cleaning up config.ini.bak
+            # Or, config.ini is a leftover from a failed test that should have been cleaned.
+            # Prioritize restoring backup if it exists.
+            if os.path.exists("config.ini.bak"):
+                os.remove("config.ini") # Remove current config.ini to allow rename from .bak
+            else:
+                # If no backup, current config.ini might be a leftover or the one we are about to create over.
+                # It's safer to rename it to .bak before creating the new one.
+                os.rename("config.ini", "config.ini.bak")
         os.rename(TEST_CONFIG_FILE, "config.ini")
 
 
@@ -76,17 +85,81 @@ class TestLLMInteractionLogger(unittest.TestCase):
             self.assertIn(prompt, output)
             self.assertIn(f"[RESPONSE]", output)
             self.assertIn(response, output)
+            # Ensure it's the post-response header
+            self.assertIn("[LLM Interaction Log - POST-RESPONSE]", output)
+            self.assertNotIn("[LLM Interaction Log - PRE-REQUEST]", output)
 
-        # Test file output - Logger needs to be instantiated again if not already,
-        # or ensure the one from the 'with' block wrote to file.
-        # The logger instance from the 'with' block should have written to the file.
+
+        # Test file output
         self.assertTrue(os.path.exists(TEST_LOG_FILE))
         with open(TEST_LOG_FILE, 'r') as f:
             content = f.read()
-            self.assertIn("[LLM Interaction Log]", content)
+            # Check pre-request log in file
+            self.assertIn("[LLM Interaction Log - PRE-REQUEST]", content)
+            self.assertRegex(content, rf"\[LLM Interaction Log - PRE-REQUEST\].*Stage\s*:\s*{stage}.*\[PROMPT\].*{prompt}", os.DOTALL)
+            # Check that response section is NOT in the pre-request part of the log specifically for this stage
+            # This is tricky with full file content. We rely on the console check's specificity.
+            # A simpler check for the file is that the prompt exists for pre-request
+            # and then check the post-request part separately.
+
+            # Check post-request log in file
+            self.assertIn("[LLM Interaction Log - POST-RESPONSE]", content)
+            self.assertRegex(content, rf"\[LLM Interaction Log - POST-RESPONSE\].*Stage\s*:\s*{stage}.*\[PROMPT\].*{prompt}.*\[RESPONSE\].*{response}", os.DOTALL)
+
+            # Verify ordering if possible, or at least presence of both distinct logs
+            pre_log_index = content.find("[LLM Interaction Log - PRE-REQUEST]")
+            post_log_index = content.find("[LLM Interaction Log - POST-RESPONSE]")
+            self.assertTrue(pre_log_index != -1 and post_log_index != -1, "Both pre and post logs should be in the file")
+            # This doesn't strictly guarantee the response isn't in the pre-request block for the same stage,
+            # but combined with console checks, it's reasonably robust.
+
+    def test_log_formatting_pre_request_only(self):
+        stage = "PreRequestStage"
+        prompt = "Pre-request prompt only."
+
+        # Test console output for pre-request
+        with patch('sys.stdout', new=StringIO()) as fake_stdout:
+            logger = LLMInteractionLogger()
+            logger.log(stage, prompt) # Log without response
+            output = fake_stdout.getvalue()
+
+            self.assertIn("[LLM Interaction Log - PRE-REQUEST]", output)
+            self.assertIn(f"Stage    : {stage}", output)
+            self.assertIn(f"[PROMPT]", output)
+            self.assertIn(prompt, output)
+            self.assertNotIn("[RESPONSE]", output) # Crucial for pre-request
+
+        # Test file output for pre-request
+        self.assertTrue(os.path.exists(TEST_LOG_FILE))
+        with open(TEST_LOG_FILE, 'r') as f:
+            content = f.read()
+            self.assertIn("[LLM Interaction Log - PRE-REQUEST]", content)
             self.assertIn(f"Stage    : {stage}", content)
             self.assertIn(prompt, content)
-            self.assertIn(response, content)
+            self.assertNotIn("[RESPONSE]", content) # Crucial for pre-request
+
+    def test_error_string_logging(self):
+        stage = "ErrorStage"
+        prompt = "Prompt that led to an error."
+        error_response = "API Error: Something went terribly wrong."
+
+        with patch('sys.stdout', new=StringIO()) as fake_stdout:
+            logger = LLMInteractionLogger()
+            logger.log(stage, prompt, error_response) # Log with error string as response
+            output = fake_stdout.getvalue()
+
+            self.assertIn("[LLM Interaction Log - POST-RESPONSE]", output)
+            self.assertIn(f"Stage    : {stage}", output)
+            self.assertIn(f"[PROMPT]", output)
+            self.assertIn(prompt, output)
+            self.assertIn(f"[RESPONSE]", output)
+            self.assertIn(error_response, output) # Check if the error message is logged
+
+        self.assertTrue(os.path.exists(TEST_LOG_FILE))
+        with open(TEST_LOG_FILE, 'r') as f:
+            content = f.read()
+            self.assertIn("[LLM Interaction Log - POST-RESPONSE]", content)
+            self.assertIn(error_response, content)
 
     def test_log_level_debug(self):
         # Modify config for this test
@@ -101,12 +174,20 @@ class TestLLMInteractionLogger(unittest.TestCase):
         with patch('sys.stdout', new=StringIO()) as fake_stdout:
             # Instantiate logger again inside patch for console output testing
             logger = LLMInteractionLogger()
+            # Log full message to ensure it's processed
             logger.log("DebugStage", "Debug prompt", "Debug response")
-            self.assertIn("DebugStage", fake_stdout.getvalue())
+            output = fake_stdout.getvalue()
+            self.assertIn("DebugStage", output)
+            # Check for new header format
+            self.assertIn("[LLM Interaction Log - POST-RESPONSE]", output)
+
 
         # File check should be fine with any logger instance that used the config
         with open(TEST_LOG_FILE, 'r') as f:
-            self.assertIn("DebugStage", f.read())
+            content = f.read()
+            self.assertIn("DebugStage", content)
+            self.assertIn("[LLM Interaction Log - POST-RESPONSE]", content)
+
 
     def test_log_level_warning_suppresses_info(self):
         self.config['logging']['log_level'] = 'WARNING'
@@ -123,21 +204,18 @@ class TestLLMInteractionLogger(unittest.TestCase):
         with patch('sys.stdout', new=StringIO()) as fake_stdout:
             # Instantiate logger again inside patch for console output testing
             logger = LLMInteractionLogger()
+            # Log full message
             logger.log("InfoStage", "Info prompt", "Info response")
             output = fake_stdout.getvalue()
-            # If logger level is WARNING, and we log at WARNING, it should appear.
+            # If logger level is WARNING, and we log at WARNING (which is logger.level), it should appear.
             self.assertIn("InfoStage", output)
+            self.assertIn("[LLM Interaction Log - POST-RESPONSE]", output)
 
-        # To test suppression, we'd need to call logger.logger.info() for example.
-        # The current LLMInteractionLogger.log() method logs at self.logger.level.
-        # Let's refine this test or the logger.
-        # For now, this confirms it logs. To test suppression properly,
-        # one might try to directly use logger.logger.info() if that was the design.
-        # However, the design is LLMInteractionLogger.log() is the single entry point.
-
-        # If the intention is that LLMInteractionLogger.log only logs if the *message type*
-        # (not currently a feature) meets the threshold, this test is different.
-        # But it logs based on the configured level of the logger instance.
+        # This test, as originally written and still, confirms that messages logged
+        # via LLMInteractionLogger.log() are emitted if the logger's level is
+        # appropriate. It doesn't test suppression of lower-level direct calls
+        # (e.g., logger.logger.info()) because LLMInteractionLogger.log() is the
+        # sole public logging method for interactions.
 
     def test_log_to_console_disabled(self):
         self.config['logging']['log_to_console'] = 'False'
@@ -177,11 +255,20 @@ class TestLLMInteractionLogger(unittest.TestCase):
         with patch('sys.stdout', new=StringIO()) as fake_stdout:
             # Instantiate new logger for console check under patch
             logger_for_console_check = LLMInteractionLogger(log_file_path=TEST_LOG_FILE)
+            # Log full message
             logger_for_console_check.log("DefaultTest", "Prompt", "Response")
-            self.assertIn("DefaultTest", fake_stdout.getvalue())
+            output = fake_stdout.getvalue()
+            self.assertIn("DefaultTest", output)
+            self.assertIn("[LLM Interaction Log - POST-RESPONSE]", output)
+
 
         # File check can use the first instance or a new one, should reflect the log call
         self.assertTrue(os.path.exists(TEST_LOG_FILE))
+        with open(TEST_LOG_FILE, 'r') as f:
+            content = f.read()
+            self.assertIn("DefaultTest", content)
+            self.assertIn("[LLM Interaction Log - POST-RESPONSE]", content)
+
 
     def test_log_directory_creation(self):
         nested_log_file = os.path.join("test_logs_dir", "nested_log.log")

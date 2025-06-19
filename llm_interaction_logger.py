@@ -1,6 +1,6 @@
 import logging
-import logging
 import configparser
+from typing import Optional # Import Optional
 from datetime import datetime
 import os
 import sys # Import sys for sys.stdout
@@ -78,16 +78,32 @@ class LLMInteractionLogger:
         if not self.logger.handlers:
             self.logger.addHandler(logging.NullHandler())
 
-    def log(self, stage: str, prompt: str, response: str):
+    def log(self, stage: str, prompt: str, response: Optional[str] = None):
         # Check if the logger is configured to handle messages at its set level
         # This check is implicitly handled by logger.log() if its level is high enough.
         # Explicit check: if not self.logger.isEnabledFor(self.logger.level): return
 
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        log_message = f'''
+        if response is None:
+            # Pre-request logging
+            log_message = f'''
 ============================================================
-[LLM Interaction Log]
+[LLM Interaction Log - PRE-REQUEST]
+Stage    : {stage}
+Timestamp: {timestamp}
+============================================================
+
+[PROMPT]
+------------------------------------------------------------
+{prompt}
+------------------------------------------------------------
+'''
+        else:
+            # Post-response logging
+            log_message = f'''
+============================================================
+[LLM Interaction Log - POST-RESPONSE]
 Stage    : {stage}
 Timestamp: {timestamp}
 ============================================================
