@@ -80,7 +80,7 @@ class Evolver:
             )
 
             try:
-                response = self.llm_controller.llm.get_completion(
+                response = self.llm_controller.get_completion( # Corrected: call get_completion on llm_controller directly
                     prompt,
                     response_format={"type": "json_schema", "json_schema": {
                         "name": "response",
@@ -129,7 +129,8 @@ class Evolver:
                             "additionalProperties": False
                         },
                         "strict": True
-                    }}
+                    }},
+                    stage="Memory Evolution" # Added stage parameter
                 )
 
                 # Clean the LLM response before parsing and use .get() for safe access.

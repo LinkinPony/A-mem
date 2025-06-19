@@ -57,7 +57,7 @@ class Analyzer:
             Content for analysis:
             """ + content
         try:
-            response = self.llm_controller.llm.get_completion(prompt,
+            response = self.llm_controller.get_completion(prompt, # Corrected: call get_completion on llm_controller directly
                                                               response_format={"type": "json_schema", "json_schema": {
                                                                   "name": "response",
                                                                   "schema": {
@@ -80,7 +80,8 @@ class Analyzer:
                                                                           }
                                                                       }
                                                                   }
-                                                              }})
+                                                              }},
+                                                              stage="Content Analysis") # Added stage parameter
             # Clean the response before parsing to handle markdown code blocks.
             clean_json_str = _extract_json_from_response(response)
             if not clean_json_str:

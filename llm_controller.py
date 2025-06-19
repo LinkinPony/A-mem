@@ -4,10 +4,11 @@ from abc import ABC, abstractmethod
 from typing import Optional, Literal, Any
 
 # 为 Gemini 更新了导入
-from google import genai
-from google.genai import types
-from google.genai import errors
+import google.generativeai as genai # Corrected import
+# types and errors will be accessed via genai.types and genai.errors
 from litellm import completion
+
+from llm_interaction_logger import LLMInteractionLogger # Added import
 
 
 class BaseLLMController(ABC):
@@ -139,7 +140,7 @@ class GeminiController(BaseLLMController):
                 config_params["response_schema"] = schema
 
         # 根据新 SDK 文档，使用 GenerateContentConfig
-        config = types.GenerateContentConfig(**config_params)
+        config = genai.types.GenerateContentConfig(**config_params) # Corrected access to types
 
         try:
             # 根据新 SDK 文档，使用 client.models.generate_content
@@ -151,7 +152,7 @@ class GeminiController(BaseLLMController):
             return response.text
 
         # 根据新 SDK 文档，使用 errors.APIError
-        except (errors.APIError, ValueError) as e:
+        except (genai.errors.APIError, ValueError) as e: # Corrected access to errors
             if response_format and response_format.get("type") in ["json_schema", "json_object"]:
                 return "{}"  # 对于 JSON 请求，在出错时返回空对象
             return f"Error generating content with Gemini: {str(e)}"
@@ -168,8 +169,10 @@ class LLMController:
     def __init__(self,
                  backend: Literal["openai", "ollama", "gemini"] = "openai",
                  model: str = "gpt-4",
-                 api_key: Optional[str] = None):
+                 api_key: Optional[str] = None,
+                 logger: Optional[LLMInteractionLogger] = None): # Added logger parameter
         self.backend = backend
+        self.logger = logger # Added logger instance variable
         if backend == "openai":
             self.llm: BaseLLMController = OpenAIController(model, api_key)
         elif backend == "ollama":
@@ -179,6 +182,13 @@ class LLMController:
         else:
             raise ValueError("Backend must be one of: 'openai', 'ollama', 'gemini'")
 
-    def get_completion(self, prompt: str, response_format: dict = None, temperature: float = 0.7) -> str:
+    def get_completion(self, prompt: str, response_format: dict = None, temperature: float = 0.7, stage: Optional[str] = None) -> str: # Added stage parameter
         """根据所选后端获取 LLM 补全。"""
-        return self.llm.get_completion(prompt, response_format, temperature)
+        # The actual call to the specific LLM backend (OpenAI, Ollama, Gemini)
+        # should NOT pass the 'stage' parameter. Their get_completion methods remain unchanged.
+        response = self.llm.get_completion(prompt, response_format=response_format, temperature=temperature)
+
+        if self.logger and stage:
+            self.logger.log(stage=stage, prompt=prompt, response=response)
+
+        return response

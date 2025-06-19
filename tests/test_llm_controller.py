@@ -6,15 +6,17 @@ import os
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from llm_controller import GeminiController
-from google.genai import types
-from google.genai import errors as genai_errors
+import google.generativeai as genai # Corrected import
+from llm_controller import GeminiController, LLMController # Added LLMController
+# Removed: from google.genai import types
+# Removed: from google.genai import errors as genai_errors
+from llm_interaction_logger import LLMInteractionLogger # Added LLMInteractionLogger
 
 class TestGeminiController(unittest.TestCase):
 
     @patch('os.getenv')
-    @patch('google.genai.Client')
-    def test_gemini_get_completion_json_output(self, mock_google_genai_Client, mock_os_getenv):
+    @patch('google.generativeai.Client') # Corrected patch target
+    def test_gemini_get_completion_json_output(self, mock_google_generativeai_Client, mock_os_getenv):
         # Arrange
         mock_os_getenv.return_value = "fake_api_key" # Mock API key
 
@@ -52,14 +54,14 @@ class TestGeminiController(unittest.TestCase):
         self.assertEqual(call_args.kwargs['contents'], prompt)
 
         generation_config = call_args.kwargs['generation_config']
-        self.assertIsInstance(generation_config, types.GenerationConfig)
+        self.assertIsInstance(generation_config, genai.types.GenerationConfig) # Corrected type
         self.assertEqual(generation_config.temperature, 0.5)
         self.assertEqual(generation_config.response_mime_type, "application/json")
         self.assertEqual(generation_config.response_schema, sample_schema)
 
     @patch('os.getenv')
-    @patch('google.genai.Client')
-    def test_gemini_get_completion_text_output(self, mock_google_genai_Client, mock_os_getenv):
+    @patch('google.generativeai.Client') # Corrected patch target
+    def test_gemini_get_completion_text_output(self, mock_google_generativeai_Client, mock_os_getenv):
         # Arrange
         mock_os_getenv.return_value = "fake_api_key"
 
@@ -87,22 +89,22 @@ class TestGeminiController(unittest.TestCase):
         self.assertEqual(call_args.kwargs['contents'], prompt)
 
         generation_config = call_args.kwargs['generation_config']
-        self.assertIsInstance(generation_config, types.GenerationConfig)
+        self.assertIsInstance(generation_config, genai.types.GenerationConfig) # Corrected type
         self.assertEqual(generation_config.temperature, 0.6)
         self.assertIsNone(getattr(generation_config, 'response_mime_type', None)) # Should not be set
         self.assertIsNone(getattr(generation_config, 'response_schema', None)) # Should not be set
 
     @patch('os.getenv')
-    @patch('google.genai.Client')
-    def test_gemini_get_completion_api_error(self, mock_google_genai_Client, mock_os_getenv):
+    @patch('google.generativeai.Client') # Corrected patch target
+    def test_gemini_get_completion_api_error(self, mock_google_generativeai_Client, mock_os_getenv):
         # Arrange
         mock_os_getenv.return_value = "fake_api_key"
 
         mock_client_instance = MagicMock()
-        mock_google_genai_Client.return_value = mock_client_instance
+        mock_google_generativeai_Client.return_value = mock_client_instance
 
         # Configure generate_content to raise an APIError
-        mock_client_instance.models.generate_content.side_effect = genai_errors.APIError("Test API Error")
+        mock_client_instance.models.generate_content.side_effect = genai.errors.APIError("Test API Error") # Corrected error type
 
         controller = GeminiController(model="gemini-pro", api_key="fake_api_key")
 
@@ -114,7 +116,7 @@ class TestGeminiController(unittest.TestCase):
         self.assertEqual(json_error_response, "{}", "Should return empty JSON string on API error for JSON requests")
 
         # Reset mock for next call if necessary (side_effect persists)
-        mock_client_instance.models.generate_content.side_effect = genai_errors.APIError("Test API Error")
+        mock_client_instance.models.generate_content.side_effect = genai.errors.APIError("Test API Error") # Corrected error type
 
         # Act & Assert for text response format
         text_error_response = controller.get_completion(prompt) # No specific format, expects text
@@ -125,14 +127,14 @@ class TestGeminiController(unittest.TestCase):
         self.assertEqual(mock_client_instance.models.generate_content.call_count, 2)
 
     @patch('os.getenv')
-    @patch('google.genai.Client')
-    def test_gemini_get_completion_blocked_prompt_error_json(self, mock_google_genai_Client, mock_os_getenv):
+    @patch('google.generativeai.Client') # Corrected patch target
+    def test_gemini_get_completion_blocked_prompt_error_json(self, mock_google_generativeai_Client, mock_os_getenv):
         # Arrange
         mock_os_getenv.return_value = "fake_api_key"
         mock_client_instance = MagicMock()
-        mock_google_genai_Client.return_value = mock_client_instance
+        mock_google_generativeai_Client.return_value = mock_client_instance
 
-        mock_client_instance.models.generate_content.side_effect = genai_errors.BlockedPromptException("Prompt blocked")
+        mock_client_instance.models.generate_content.side_effect = genai.errors.BlockedPromptException("Prompt blocked") # Corrected error type
         controller = GeminiController(api_key="fake_api_key")
         prompt = "A problematic prompt"
         response_format = {"type": "json_object"}
@@ -146,12 +148,12 @@ class TestGeminiController(unittest.TestCase):
 
 
     @patch('os.getenv')
-    @patch('google.genai.Client')
-    def test_gemini_get_completion_empty_response_value_error_json(self, mock_google_genai_Client, mock_os_getenv):
+    @patch('google.generativeai.Client') # Corrected patch target
+    def test_gemini_get_completion_empty_response_value_error_json(self, mock_google_generativeai_Client, mock_os_getenv):
         # Arrange
         mock_os_getenv.return_value = "fake_api_key"
         mock_client_instance = MagicMock()
-        mock_google_genai_Client.return_value = mock_client_instance
+        mock_google_generativeai_Client.return_value = mock_client_instance
 
         # Simulate a response object that would lead to the specific ValueError for empty/problematic content
         mock_empty_response = MagicMock()
@@ -177,6 +179,65 @@ class TestGeminiController(unittest.TestCase):
         # will be caught by the generic ValueError handler.
         self.assertEqual(response, "{}")
         mock_client_instance.models.generate_content.assert_called_once()
+
+
+class TestLLMControllerLogging(unittest.TestCase):
+
+    def test_get_completion_with_stage_calls_logger(self):
+        mock_backend_llm = MagicMock()
+        mock_backend_llm.get_completion.return_value = "mocked response"
+
+        mock_logger = MagicMock(spec=LLMInteractionLogger)
+
+        # Patch the specific backend controller that LLMController would instantiate.
+        # Assuming default backend is 'openai' or it's explicitly set.
+        with patch('llm_controller.OpenAIController', return_value=mock_backend_llm) as MockOpenAI:
+            # Ensure LLMController uses the 'openai' backend string to trigger MockOpenAI
+            controller = LLMController(backend='openai', logger=mock_logger)
+
+            test_prompt = "Hello LLM"
+            test_stage = "TestStage"
+
+            response = controller.get_completion(prompt=test_prompt, stage=test_stage)
+
+            self.assertEqual(response, "mocked response")
+            # Check that the *mocked backend's* get_completion was called by LLMController
+            mock_backend_llm.get_completion.assert_called_once_with(test_prompt, response_format=None, temperature=0.7)
+            # Check that the logger was called with the correct parameters
+            mock_logger.log.assert_called_once_with(stage=test_stage, prompt=test_prompt, response="mocked response")
+
+    def test_get_completion_without_stage_does_not_call_logger(self):
+        mock_backend_llm = MagicMock()
+        mock_backend_llm.get_completion.return_value = "mocked response"
+        mock_logger = MagicMock(spec=LLMInteractionLogger)
+
+        with patch('llm_controller.OpenAIController', return_value=mock_backend_llm):
+            controller = LLMController(backend='openai', logger=mock_logger)
+            test_prompt = "Hello again"
+            response = controller.get_completion(prompt=test_prompt) # No stage
+
+            self.assertEqual(response, "mocked response")
+            mock_backend_llm.get_completion.assert_called_once_with(test_prompt, response_format=None, temperature=0.7)
+            mock_logger.log.assert_not_called()
+
+    def test_get_completion_with_stage_but_no_logger(self):
+        mock_backend_llm = MagicMock()
+        mock_backend_llm.get_completion.return_value = "mocked response"
+
+        with patch('llm_controller.OpenAIController', return_value=mock_backend_llm):
+            controller = LLMController(backend='openai', logger=None) # No logger
+            test_prompt = "Hello one more time"
+            test_stage = "TestStageNoLogger"
+
+            try:
+                response = controller.get_completion(prompt=test_prompt, stage=test_stage)
+                self.assertEqual(response, "mocked response")
+            except Exception as e:
+                self.fail(f"LLMController raised an exception when no logger was provided: {e}")
+
+            mock_backend_llm.get_completion.assert_called_once_with(test_prompt, response_format=None, temperature=0.7)
+            # No specific logger call to assert as it shouldn't exist or be called.
+            # The main check is that no error occurred.
 
 if __name__ == '__main__':
     unittest.main()

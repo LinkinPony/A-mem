@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import List, Dict, Optional, Any, Tuple
 
 from llm_controller import LLMController
+from llm_interaction_logger import LLMInteractionLogger # Added import
 from retrievers import ChromaRetriever
 
 from memory.note import MemoryNote
@@ -54,7 +55,16 @@ class AgenticMemorySystem:
 
         self.retriever = ChromaRetriever(collection_name="memories", model_name=self.model_name,
                                          db_path=self.db_path)
-        self.llm_controller = LLMController(llm_backend, llm_model, api_key)
+
+        # Create and inject LLMInteractionLogger
+        llm_interaction_logger_instance = LLMInteractionLogger() # Instantiate the logger
+
+        self.llm_controller = LLMController(
+            backend=llm_backend,
+            model=llm_model,
+            api_key=api_key,
+            logger=llm_interaction_logger_instance # Pass the logger instance
+        )
 
         self.analyzer = Analyzer(llm_controller=self.llm_controller)
         self.evolver = Evolver(llm_controller=self.llm_controller,
