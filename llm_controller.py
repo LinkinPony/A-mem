@@ -4,7 +4,9 @@ from abc import ABC, abstractmethod
 from typing import Optional, Literal, Any
 
 # 为 Gemini 更新了导入
-import google.generativeai as genai # Corrected import
+from google import genai
+from google.genai import types
+from google.genai import errors
 # types and errors will be accessed via genai.types and genai.errors
 from litellm import completion
 
