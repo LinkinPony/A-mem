@@ -1,18 +1,38 @@
 import unittest
-from memory_system import AgenticMemorySystem, MemoryNote
+import uuid
+
+from memory.system import AgenticMemorySystem
+from memory.note import MemoryNote
 from datetime import datetime
-import json
+import shutil
+import os
+
 
 class TestAgenticMemorySystem(unittest.TestCase):
     def setUp(self):
         """Set up test environment before each test."""
+        self.test_db_path = f"./test_chroma_db/{uuid.uuid4().hex}"  # Define temp path
+        # Ensure the directory does not exist from a previous failed run
+        if os.path.exists(self.test_db_path):
+            shutil.rmtree(self.test_db_path)
+        os.makedirs(self.test_db_path, exist_ok=True) # Create the directory
+
         self.memory_system = AgenticMemorySystem(
-            # model_name='sentence-transformers/paraphrase-mpnet-base-v2',
             model_name='all-MiniLM-L6-v2',
-            llm_backend="openai",
-            llm_model="gpt-4o-mini"
+            llm_backend="gemini",
+            llm_model="gemini-2.5-flash-lite-preview-06-17",
+            db_path=self.test_db_path  # Pass temp path
         )
         
+    def tearDown(self):
+        """Clean up test environment after each test."""
+        # Gracefully shut down the system to release file handles BEFORE deleting files.
+        if self.memory_system:
+            self.memory_system.shutdown()
+        # Remove the temporary database directory
+        if os.path.exists(self.test_db_path):
+            shutil.rmtree(self.test_db_path,ignore_errors=True)
+
     def test_create_memory(self):
         """Test creating a new memory with complete metadata."""
         content = "Test memory content"
@@ -261,15 +281,14 @@ class TestAgenticMemorySystem(unittest.TestCase):
         # Get the memory
         memory = self.memory_system.read(memory_id)
         
-        # Process the memory
-        should_evolve, processed_memory = self.memory_system.process_memory(memory)
-        
-        # Verify processing results
-        self.assertIsInstance(should_evolve, bool)
-        self.assertIsInstance(processed_memory, MemoryNote)
-        self.assertIsNotNone(processed_memory.tags)
-        self.assertIsNotNone(processed_memory.context)
-        self.assertIsNotNone(processed_memory.keywords)
+        # Verify processing results by checking the attributes of the retrieved memory
+        # The add_note method now handles analysis and evolution implicitly.
+        self.assertIsInstance(memory, MemoryNote)
+        self.assertIsNotNone(memory.tags)
+        self.assertIsNotNone(memory.context)
+        self.assertIsNotNone(memory.keywords)
+
+
 
 if __name__ == '__main__':
     unittest.main()

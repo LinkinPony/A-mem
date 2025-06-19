@@ -17,16 +17,24 @@ def simple_tokenize(text):
 
 class ChromaRetriever:
     """Vector database retrieval using ChromaDB"""
-    def __init__(self, collection_name: str = "memories",model_name: str = "all-MiniLM-L6-v2"):
+    def __init__(self, collection_name: str = "memories", model_name: str = "all-MiniLM-L6-v2", db_path: str = "./chroma_db"):
         """Initialize ChromaDB retriever.
         
         Args:
             collection_name: Name of the ChromaDB collection
+            model_name: Name of the sentence transformer model
+            db_path: Path to the database directory
         """
-        self.client = chromadb.Client(Settings(allow_reset=True))
+        # 2. 创建一个允许重置的配置
+        client_settings = Settings(allow_reset=True)
+
+        # 3. 在初始化客户端时传入该配置
+        self.client = chromadb.PersistentClient(path=db_path, settings=client_settings)
+
         self.embedding_function = SentenceTransformerEmbeddingFunction(model_name=model_name)
-        self.collection = self.client.get_or_create_collection(name=collection_name,embedding_function=self.embedding_function)
-        
+        self.collection = self.client.get_or_create_collection(name=collection_name,
+                                                               embedding_function=self.embedding_function)
+
     def add_document(self, document: str, metadata: Dict, doc_id: str):
         """Add a document to ChromaDB.
         
@@ -100,3 +108,10 @@ class ChromaRetriever:
                                     pass
                         
         return results
+
+    def shutdown(self):
+        """
+        Resets the ChromaDB client. This clears the database and releases file locks,
+        which is essential for cleanup in testing environments.
+        """
+        self.client.reset()

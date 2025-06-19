@@ -88,11 +88,30 @@ Here's how to use the Agentic Memory system for basic operations:
 from memory_system import AgenticMemorySystem
 
 # Initialize the memory system 🚀
-memory_system = AgenticMemorySystem(
+# Example with OpenAI (default)
+memory_system_openai = AgenticMemorySystem(
     model_name='all-MiniLM-L6-v2',  # Embedding model for ChromaDB
-    llm_backend="openai",           # LLM backend (openai/ollama)
-    llm_model="gpt-4o-mini"         # LLM model name
+    llm_backend="openai",           # LLM backend (openai/ollama/gemini)
+    llm_model="gpt-4o-mini"         # LLM model name for the chosen backend
 )
+
+# Example with Ollama (ensure Ollama server is running)
+# memory_system_ollama = AgenticMemorySystem(
+#     model_name='all-MiniLM-L6-v2',
+#     llm_backend="ollama",
+#     llm_model="llama2" # Specify your Ollama model
+# )
+
+# Example with Gemini (see "Multiple LLM Backends" section for API key configuration)
+# memory_system_gemini = AgenticMemorySystem(
+#     model_name='all-MiniLM-L6-v2',
+#     llm_backend="gemini",
+#     llm_model="gemini-pro"
+# )
+
+# For this example, we'll use the OpenAI setup.
+# To run with a different backend, comment out the line below and uncomment the desired setup.
+memory_system = memory_system_openai
 
 # Add Memories ➕
 # Simple addition
@@ -158,6 +177,35 @@ memory_system.delete(memory_id)
 4. **Multiple LLM Backends** 🤖
    - OpenAI (GPT-4, GPT-3.5)
    - Ollama (for local deployment)
+   - Google Gemini (e.g., gemini-pro)
+
+   **Configuring Gemini:**
+
+   To use Google Gemini models, you'll need to provide an API key. You can do this in one of two ways:
+
+   1.  **Environment Variable:** Set the `GEMINI_API_KEY` environment variable.
+       ```bash
+       export GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
+       ```
+       Then initialize `AgenticMemorySystem` without the `api_key` parameter:
+       ```python
+       # Using Gemini with API key from environment variable GEMINI_API_KEY
+       memory_system_gemini_env = AgenticMemorySystem(
+           llm_backend="gemini",
+           llm_model="gemini-pro" # Or other compatible Gemini model
+       )
+       ```
+
+   2.  **Directly in Code:** Pass the API key using the `api_key` parameter during initialization.
+       ```python
+       # Using Gemini with API key passed directly
+       gemini_api_key = "YOUR_GEMINI_API_KEY"
+       memory_system_gemini_direct = AgenticMemorySystem(
+           llm_backend="gemini",
+           llm_model="gemini-pro", # Or other compatible Gemini model
+           api_key=gemini_api_key
+       )
+       ```
 
 ### Best Practices 💪
 
