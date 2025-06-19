@@ -18,6 +18,24 @@ from memory.evolver import Evolver
 
 logger = logging.getLogger(__name__)
 
+
+def _note_to_metadata(note: MemoryNote) -> Dict:
+    """将MemoryNote对象转换为ChromaDB所需的元数据字典。"""
+    return {
+        "id": note.id,
+        "content": note.content,
+        "keywords": note.keywords,
+        "links": note.links,
+        "retrieval_count": note.retrieval_count,
+        "timestamp": note.timestamp,
+        "last_accessed": note.last_accessed,
+        "context": note.context,
+        "evolution_history": note.evolution_history,
+        "category": note.category,
+        "tags": note.tags
+    }
+
+
 class AgenticMemorySystem:
     """Core memory system that manages memory notes and their evolution.
 
@@ -67,59 +85,65 @@ class AgenticMemorySystem:
         )
 
         self.analyzer = Analyzer(llm_controller=self.llm_controller)
-        self.evolver = Evolver(llm_controller=self.llm_controller,
-                               memories=self.memories,  # Pass the actual dictionary
-                               find_related_memories_callable=self.find_related_memories)
+        self.evolver = Evolver(
+            llm_controller=self.llm_controller,
+            memories=self.memories,
+            find_related_memories_callable=self.find_related_memories,
+            update_memory_callable=self.update  # <--- 将 self.update 方法传递给 Evolver
+        )
 
         self.evo_cnt = 0
         self.evo_threshold = evo_threshold
 
     def add_note(self, content: str, time: Optional[str] = None, **kwargs) -> str:
-        """Add a new memory note, analyze it, and process it for evolution."""
+        """
+        添加一个新的记忆笔记，对其进行分析，并处理其演化。
 
-        # Analyze content to get initial metadata if not provided
-        # Pass content directly to analyzer
+        Args:
+            content (str): 笔记的主要内容。
+            time (Optional[str]): 可选的时间戳。
+            **kwargs: 其他传递给MemoryNote的元数据。
+
+        Returns:
+            str: 创建的笔记的ID。
+        """
+        # 1. 使用分析器获取初始元数据
         analysis_results = self.analyzer.analyze_content(content)
 
-        # Prioritize kwargs for metadata, then fill with analysis_results
-        keywords = kwargs.get('keywords', analysis_results.get('keywords', []))
-        context = kwargs.get('context', analysis_results.get('context', "General"))
-        tags = kwargs.get('tags', analysis_results.get('tags', []))
-
-        # Update kwargs with potentially derived values for MemoryNote creation
-        kwargs['keywords'] = keywords
-        kwargs['context'] = context
-        kwargs['tags'] = tags
-
-        if time is not None:
-            kwargs['timestamp'] = time
-
-        note = MemoryNote(content=content, **kwargs)
-
-        # Process memory for evolution
-        evo_label, updated_note = self.evolver.evolve_memory(note)
-        self.memories[updated_note.id] = updated_note # Store the potentially updated note
-
-        # Add to ChromaDB with complete metadata from the (potentially) updated note
-        metadata = {
-            "id": updated_note.id,
-            "content": updated_note.content,
-            "keywords": updated_note.keywords,
-            "links": updated_note.links,
-            "retrieval_count": updated_note.retrieval_count,
-            "timestamp": updated_note.timestamp,
-            "last_accessed": updated_note.last_accessed,
-            "context": updated_note.context,
-            "evolution_history": updated_note.evolution_history,
-            "category": updated_note.category,
-            "tags": updated_note.tags
+        # 2. 准备创建MemoryNote所需的所有属性
+        note_kwargs = {
+            'keywords': kwargs.get('keywords', analysis_results.get('keywords', [])),
+            'context': kwargs.get('context', analysis_results.get('context', "General")),
+            'tags': kwargs.get('tags', analysis_results.get('tags', [])),
+            'timestamp': time if time is not None else None
         }
+        # 过滤掉值为None的键
+        note_kwargs = {k: v for k, v in note_kwargs.items() if v is not None}
+
+        note = MemoryNote(content=content, **note_kwargs)
+
+        # 在处理演化之前，必须将新笔记先放入 self.memories
+        # 这样 Evolver 才能在需要时（如添加反向链接）找到它。
+        self.memories[note.id] = note
+
+        # 3. 调用Evolver处理记忆演化
+        # 这个方法现在会处理所有逻辑，包括更新邻居和持久化
+        evo_label, updated_note = self.evolver.evolve_memory(note)
+
+        # 4. 确保内存中的笔记对象是最新的
+        self.memories[updated_note.id] = updated_note
+
+        # 5. 将最终状态的新笔记持久化到ChromaDB
+        # 注意：邻居的更新已经在 evolve_memory 内部通过调用 self.update() 完成了
+        metadata = _note_to_metadata(updated_note)
         self.retriever.add_document(updated_note.content, metadata, updated_note.id)
 
-        if evo_label: # evo_label is True if evolution occurred
+        # 6. 检查是否需要进行内存整理
+        if evo_label:
             self.evo_cnt += 1
             if self.evo_cnt % self.evo_threshold == 0:
                 self.consolidate_memories()
+
         return updated_note.id
 
     def consolidate_memories(self):
@@ -145,40 +169,58 @@ class AgenticMemorySystem:
             }
             self.retriever.add_document(memory.content, metadata, memory.id)
 
-    def find_related_memories(self, query: str, k: int = 5) -> Tuple[str, List[int]]:
-        """Find related memories using ChromaDB retrieval.
+    def find_related_memories(self, query: str, k: int = 5) -> Tuple[str, List[str]]:
+        """
+        Find related memories using ChromaDB retrieval and format them for the Evolver.
 
         This method is passed to the Evolver instance.
+
+        Args:
+            query: The text to find related memories for.
+            k: The number of related memories to find.
+
+        Returns:
+            A tuple containing:
+            - A formatted string of related memories for the LLM prompt, including their IDs.
+            - A list of the actual memory note IDs (UUIDs).
         """
-        if not self.memories: # Check if self.memories is empty
+        if not self.memories:  # Check if self.memories is empty
             return "", []
 
         try:
+            # 1. 从ChromaDB检索结果
             results = self.retriever.search(query, k)
-            memory_str = ""
-            indices = []
 
-            if 'ids' in results and results['ids'] and results['ids'][0]:
-                for i, doc_id in enumerate(results['ids'][0]):
-                    # Ensure we don't go out of bounds for metadatas
-                    if i < len(results['metadatas'][0]):
-                        metadata = results['metadatas'][0][i]
-                        # It's safer to retrieve the full note from self.memories
-                        # to ensure all data is consistent, though metadata from Chroma might suffice.
-                        # For now, using metadata from Chroma as per original logic.
-                        memory_str += (f"memory index:{i}\t"
-                                       f"talk start time:{metadata.get('timestamp', '')}\t"
-                                       f"memory content: {metadata.get('content', '')}\t"
-                                       f"memory context: {metadata.get('context', '')}\t"
-                                       f"memory keywords: {str(metadata.get('keywords', []))}\t"
-                                       f"memory tags: {str(metadata.get('tags', []))}\n")
-                        # The 'indices' here are just sequential numbers based on k,
-                        # not necessarily direct indices into self.memories unless results are ordered that way.
-                        # This matches the original logic.
-                        indices.append(i)
-            return memory_str, indices
+            # 检查结果是否有效
+            if not results or not results.get('ids') or not results['ids'][0]:
+                return "", []
+
+            # 2. 直接从检索结果中获取真实的UUID列表
+            # 这解决了返回错误索引的问题。
+            neighbor_ids = results['ids'][0]
+
+            # 3. 构建提供给LLM的文本，并清晰地包含每个记忆的真实ID
+            # 这将确保LLM在其响应中返回正确的ID。
+            memory_parts = []
+            for i, doc_id in enumerate(neighbor_ids):
+                if doc_id in self.memories:
+                    note = self.memories[doc_id]
+                    # 使用f-string和清晰的标签来格式化，提高LLM的理解能力
+                    memory_parts.append(
+                        f"ID: {note.id}\n"
+                        f"Content: {note.content}\n"
+                        f"Context: {note.context}\n"
+                        f"Tags: {note.tags}"
+                    )
+
+            # 用分隔符连接每个记忆的信息，使其更易于解析
+            memory_str = "\n---\n".join(memory_parts)
+
+            # 4. 返回格式化后的字符串和真实的UUID列表
+            return memory_str, neighbor_ids
+
         except Exception as e:
-            logger.error(f"Error in find_related_memories: {str(e)}")
+            logger.error(f"Error in find_related_memories: {str(e)}", exc_info=True)
             return "", []
 
     def find_related_memories_raw(self, query: str, k: int = 5) -> str:
@@ -315,7 +357,7 @@ class AgenticMemorySystem:
                     continue
 
                 # Ensure metadatas exist and index is valid
-                if not ('metadatas' in results and results['metadatas'] and \
+                if not ('metadatas' in results and results['metadatas'] and
                         i < len(results['metadatas'][0])):
                     continue
 
