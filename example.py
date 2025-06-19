@@ -1,120 +1,171 @@
-import shutil
+import logging
 import os
-import time
-from memory.system import AgenticMemorySystem
+from dotenv import load_dotenv
 
-# --- Initial Setup ---
-print("--- Initializing Environment and Memory System ---")
+# Configure basic logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-# Define database paths
-openai_db_dir = "./example_openai_chroma_db"
-gemini_db_dir = "./example_gemini_chroma_db"
+# Load environment variables from .env file
+load_dotenv()
 
-# Clean up previous database directories if they exist
-for path in [openai_db_dir, gemini_db_dir]:
-    if os.path.exists(path):
-        shutil.rmtree(path)
-    os.makedirs(path, exist_ok=True)  # Create the directory
+# Assuming the new classes are available via the memory package
+from memory import ChromaRetriever, AgenticMemory, QueryPlanner, MemoryNote
+from llm_controller import LLMController
+from llm_interaction_logger import LLMInteractionLogger
 
-# --- Example using Gemini ---
-# Ensure your GEMINI_API_KEY environment variable is set.
-# You can get a key from Google AI Studio.
-print("\nInitializing AgenticMemorySystem with Gemini...")
-try:
-    memory_system = AgenticMemorySystem(
-        model_name='all-MiniLM-L6-v2',      # Embedding model for ChromaDB
-        llm_backend="gemini",               # LLM backend
-        llm_model="gemini-2.5-flash-lite-preview-06-17",# Using a powerful and recent Gemini model
-        db_path=gemini_db_dir               # Use a different DB path for separate testing
+# Configuration (consider moving to a config file or environment variables)
+DB_PATH = "./example_chroma_db"
+COLLECTION_NAME = "example_memories"
+MODEL_NAME = "all-MiniLM-L6-v2" # Sentence transformer model
+
+# LLM Configuration - replace with your actual details if not using mocks
+# Ensure OPENAI_API_KEY is set in your environment or .env file
+LLM_BACKEND = os.getenv("LLM_BACKEND", "openai") # "openai" or "ollama"
+LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini") # e.g., "gpt-4o-mini" or your Ollama model
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+def run_example():
+    logger.info("Starting A-Mem Refactored Example...")
+
+    # 1. Initialize components
+    llm_interaction_logger = LLMInteractionLogger(log_to_console=True) # Log LLM interactions
+
+    # Ensure API key is provided if using OpenAI
+    if LLM_BACKEND == "openai" and not OPENAI_API_KEY:
+        logger.error("OPENAI_API_KEY is not set. Please set it in your .env file or environment.")
+        # You could raise an error here or use a mock/dummy LLM controller for the example
+        # For this example, let's try to proceed but warn that LLM features will fail.
+        # llm_controller = LLMController(backend="mock", model="mock", logger=llm_interaction_logger)
+        print("Error: OPENAI_API_KEY not found. LLM functionalities will be limited or fail.")
+        print("Please set your OPENAI_API_KEY in a .env file or as an environment variable.")
+        # Fallback or exit
+        llm_controller = LLMController(backend="mock", model="mock-model-for-example", api_key=" DUMMY_KEY ", logger=llm_interaction_logger)
+
+    else:
+        llm_controller = LLMController(
+            backend=LLM_BACKEND,
+            model=LLM_MODEL,
+            api_key=OPENAI_API_KEY,
+            logger=llm_interaction_logger
+        )
+
+    retriever = ChromaRetriever(
+        collection_name=COLLECTION_NAME,
+        model_name=MODEL_NAME,
+        db_path=DB_PATH
     )
-    print("Gemini-based system initialized successfully.")
-    print(f"Using '{memory_system.llm_controller.llm.model_name}' model with '{memory_system.llm_controller.backend}' backend.\n")
-except Exception as e:
-    print(f"\n--- ERROR ---")
-    print(f"Failed to initialize AgenticMemorySystem: {e}")
-    print("Please ensure your GEMINI_API_KEY is set as an environment variable.")
-    print("Stopping script.")
-    exit()
+    # Important: Ensure the DB is clean for a fresh example run, or manage collections.
+    # retriever.client.reset() # This clears the ENTIRE database. Use with caution.
+    # Or, delete and recreate the specific collection if supported, or use unique names.
+    # For this example, we'll rely on Chroma's get_or_create_collection.
+
+    agentic_memory = AgenticMemory(retriever=retriever, llm_controller=llm_controller)
+    query_planner = QueryPlanner(agentic_memory=agentic_memory, llm_controller=llm_controller)
+
+    logger.info("All components initialized.")
+
+    # 2. Add some memories
+    logger.info("Adding memories...")
+    try:
+        note_id1 = agentic_memory.add("The first memory is about a sunny day in Paris.", category="Travel", tags=["paris", "weather", "experience"])
+        logger.info(f"Added memory 1 with ID: {note_id1}")
+
+        note_id2 = agentic_memory.add("A second memory describes a recipe for pasta carbonara.", category="Food", tags=["recipe", "pasta", "italian"])
+        logger.info(f"Added memory 2 with ID: {note_id2}")
+
+        note_id3 = agentic_memory.add("Thinking about the future of artificial intelligence and its impact on society.", category="Technology", tags=["ai", "future", "society", "ethics"])
+        logger.info(f"Added memory 3 with ID: {note_id3}")
+
+    except Exception as e:
+        logger.error(f"Error adding memories: {e}", exc_info=True)
+        # If LLM calls fail due to API key issues, this is where it might show up.
+        # The mock LLMController in tests is different from a real one here.
+
+    # 3. Retrieve a memory by ID
+    logger.info("\n--- Retrieving a memory by ID ---")
+    if 'note_id1' in locals() and note_id1: # Check if note_id1 was successfully created
+        retrieved_note_obj = agentic_memory.get(note_id1) # Returns MemoryNote object
+        if retrieved_note_obj:
+            logger.info(f"Retrieved memory by ID ({note_id1}):")
+            logger.info(f"  Content: {retrieved_note_obj.content}")
+            logger.info(f"  Category: {retrieved_note_obj.category}")
+            logger.info(f"  Tags: {retrieved_note_obj.tags}")
+            logger.info(f"  Links: {retrieved_note_obj.links}")
+        else:
+            logger.warning(f"Could not retrieve memory with ID: {note_id1}")
+    else:
+        logger.warning("note_id1 not available, skipping retrieval by ID.")
 
 
-# --- 1. Add a series of related memories to observe evolution ---
-print("--- 1. Adding a series of related memories on 'Python for Data Science' ---")
+    # 4. Search for memories using QueryPlanner's simple search
+    logger.info("\n--- Simple Search via QueryPlanner ---")
+    search_query_simple = "italian food"
+    logger.info(f"Searching for: '{search_query_simple}'")
+    simple_search_results = query_planner.simple_search(search_query_simple, k=2)
+    if simple_search_results:
+        logger.info("Simple search results:")
+        for res in simple_search_results:
+            logger.info(f"  ID: {res['id']}, Score: {res.get('score', 'N/A')}, Content: {res['content'][:50]}...")
+            logger.info(f"    Tags: {res.get('tags')}")
+    else:
+        logger.info("No results found for simple search.")
 
-# Memory 1: A general, foundational note. As the first note, it won't be
-# evolved immediately, but it will serve as a seed for future evolution.
-print("\n[Adding Note 1] A general note about Python...")
-note_id_python = memory_system.add_note(
-    "Python is a versatile high-level programming language, widely used for web development, data science, and scripting."
-)
-time.sleep(1) # Small delay to avoid overwhelming any API rate limits
+    # 5. Search for memories using QueryPlanner's agentic search
+    logger.info("\n--- Agentic Search via QueryPlanner ---")
+    search_query_agentic = "artificial intelligence ethics"
+    logger.info(f"Searching for: '{search_query_agentic}'")
+    agentic_search_results = query_planner.agentic_search(search_query_agentic, k=3)
+    if agentic_search_results:
+        logger.info("Agentic search results:")
+        for res in agentic_search_results:
+            logger.info(f"  ID: {res['id']}, Score: {res.get('score', 'N/A')}, Content: {res['content'][:60]}..., Neighbor: {res.get('is_neighbor', False)}")
+            logger.info(f"    Tags: {res.get('tags')}")
+    else:
+        logger.info("No results found for agentic search.")
 
-# Memory 2: A related note. Its addition should trigger the LLM to analyze
-# its relationship with the first note, starting the evolution process.
-print("\n[Adding Note 2] A note about the Pandas library...")
-note_id_pandas = memory_system.add_note(
-    "Pandas is a powerful Python library for data manipulation and analysis, providing data structures like DataFrame."
-)
-time.sleep(1)
-
-# Memory 3: Another core data science library.
-print("\n[Adding Note 3] A note about NumPy...")
-note_id_numpy = memory_system.add_note(
-    "NumPy (Numerical Python) is the fundamental package for scientific computing with Python. It provides support for large, multi-dimensional arrays and matrices."
-)
-time.sleep(1)
-
-# Memory 4: A visualization library that builds on the others.
-print("\n[Adding Note 4] A note about Matplotlib...")
-note_id_matplotlib = memory_system.add_note(
-    "Matplotlib is a comprehensive library for creating static, animated, and interactive visualizations in Python. It works well with NumPy and Pandas."
-)
-time.sleep(1)
-
-# Memory 5: A machine learning library, tying everything together.
-print("\n[Adding Note 5] A note about Scikit-learn...")
-note_id_sklearn = memory_system.add_note(
-    "Scikit-learn is a free software machine learning library for the Python programming language. It features various classification, regression and clustering algorithms."
-)
-
-print("\n--- All notes have been added. ---\n")
-
-
-# --- 2. Observe the evolution of an early memory ---
-print("--- 2. Observing the evolution of the first memory ---")
-print("Let's inspect the first note about 'Python' to see how its metadata has been updated by the addition of related notes.")
-
-evolved_python_note = memory_system.read(note_id_python)
-if evolved_python_note:
-    print(f"\nOriginal Content: '{evolved_python_note.content}'")
-    print("-" * 30)
-    print("Evolved Metadata:")
-    print(f"  - Keywords: {evolved_python_note.keywords}")
-    print(f"  - Tags:     {evolved_python_note.tags}")
-    print(f"  - Context:  {evolved_python_note.context}")
-    print(f"  - Links (Connected to other notes): {evolved_python_note.links}")
-    print("-" * 30)
-else:
-    print(f"Could not find the note with ID {note_id_python}")
-
-print("\nNotice how its metadata is no longer empty. The LLM has enriched it based on the other notes that were added.\n")
+    # 6. Example of updating a memory (optional)
+    logger.info("\n--- Updating a memory ---")
+    if 'note_id1' in locals() and note_id1:
+        update_success = agentic_memory.update(note_id1, content="The first memory is now about a rainy day in Paris, but it was still beautiful.", tags=["paris", "weather", "experience", "rainy_day_update"])
+        if update_success:
+            logger.info(f"Successfully updated memory {note_id1}.")
+            updated_note = agentic_memory.get(note_id1)
+            logger.info(f"  New content snippet: {updated_note.content[:50]}...")
+            logger.info(f"  New tags: {updated_note.tags}")
+        else:
+            logger.warning(f"Failed to update memory {note_id1}")
+    else:
+        logger.warning("note_id1 not available, skipping update example.")
 
 
-# --- 3. Search the evolved knowledge network ---
-print("--- 3. Searching the evolved knowledge network ---")
-print("Now, let's perform a search for 'tools for data analysis in Python' to see how the system retrieves the interconnected notes.")
+    # 7. Example of deleting a memory (optional)
+    # logger.info("\n--- Deleting a memory ---")
+    # if 'note_id2' in locals() and note_id2:
+    #     delete_success = agentic_memory.delete(note_id2)
+    #     if delete_success:
+    #         logger.info(f"Successfully deleted memory {note_id2}.")
+    #         self.assertIsNone(agentic_memory.get(note_id2), "Note should be deleted.")
+    #     else:
+    #         logger.warning(f"Failed to delete memory {note_id2}")
+    # else:
+    #    logger.warning("note_id2 not available, skipping delete example.")
 
-search_query = "tools for data analysis in Python"
-results = memory_system.search_agentic(search_query, k=5)
 
-if results:
-    print(f"\nFound {len(results)} results for '{search_query}':\n")
-    for result in results:
-        print(f"ID:      {result['id']}")
-        print(f"Content: '{result['content']}'")
-        print(f"Tags:    {result['tags']}")
-        print(f"Score:   {result.get('score', 'N/A')}")
-        print("---")
-else:
-    print(f"No results found for '{search_query}'.")
+    # Cleanup: Shutdown retriever (optional, depends on use case)
+    # For this example, explicitly shutting down to release resources and clear DB if reset is implemented in shutdown.
+    logger.info("Shutting down retriever...")
+    retriever.shutdown()
+    logger.info("Example finished.")
 
-print("\nExample script finished.")
+if __name__ == "__main__":
+    # Clean up old DB if it exists for a fresh run of the example
+    if os.path.exists(DB_PATH):
+        logger.info(f"Removing old database at {DB_PATH} for a fresh example run.")
+        try:
+            shutil.rmtree(DB_PATH)
+        except OSError as e:
+            logger.error(f"Error removing directory {DB_PATH}: {e.strerror}")
+            logger.warning("Please ensure the DB path is clear if you want a completely fresh example.")
+
+    run_example()
