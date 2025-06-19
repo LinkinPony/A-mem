@@ -53,7 +53,7 @@ print("正在初始化 AgenticMemorySystem...")
 try:
     memory_system = AgenticMemorySystem(
         llm_backend="gemini",
-        llm_model="gemini-2.5-flash-lite-preview-06-17",  # 推荐使用能力更强的模型以获得更好的推理结果
+        llm_model="gemini-2.5-pro",  # 推荐使用能力更强的模型以获得更好的推理结果
         db_path=db_path
     )
     print("系统初始化成功。")

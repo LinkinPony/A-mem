@@ -25,7 +25,7 @@ class UpdateNeighborAction(BaseModel):
 
 class EvolutionDecision(BaseModel):
     should_evolve: bool = Field(..., description="是否应该演化当前记忆。")
-    actions: List[Union[StrengthenAction, UpdateNeighborAction]] = Field(..., description="要执行的演化操作列表。")
+    actions: List[Union[StrengthenAction, UpdateNeighborAction]] = Field(default=[], description="要执行的演化操作列表。")
 
 
 class Evolver:
