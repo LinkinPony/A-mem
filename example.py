@@ -1,6 +1,7 @@
 import logging
 import os
 from dotenv import load_dotenv
+import shutil
 
 # Configure basic logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
@@ -30,26 +31,8 @@ def run_example():
 
     # 1. Initialize components
     llm_interaction_logger = LLMInteractionLogger(log_to_console=True) # Log LLM interactions
-
-    # Ensure API key is provided if using OpenAI
-    if LLM_BACKEND == "openai" and not OPENAI_API_KEY:
-        logger.error("OPENAI_API_KEY is not set. Please set it in your .env file or environment.")
-        # You could raise an error here or use a mock/dummy LLM controller for the example
-        # For this example, let's try to proceed but warn that LLM features will fail.
-        # llm_controller = LLMController(backend="mock", model="mock", logger=llm_interaction_logger)
-        print("Error: OPENAI_API_KEY not found. LLM functionalities will be limited or fail.")
-        print("Please set your OPENAI_API_KEY in a .env file or as an environment variable.")
-        # Fallback or exit
-        llm_controller = LLMController(backend="mock", model="mock-model-for-example", api_key=" DUMMY_KEY ", logger=llm_interaction_logger)
-
-    else:
-        llm_controller = LLMController(
-            backend=LLM_BACKEND,
-            model=LLM_MODEL,
-            api_key=OPENAI_API_KEY,
-            logger=llm_interaction_logger
-        )
-
+    llm_controller = LLMController(backend="gemini", model="gemini-2.5-flash-lite-preview-06-17",
+                                   logger=llm_interaction_logger)
     retriever = ChromaRetriever(
         collection_name=COLLECTION_NAME,
         model_name=MODEL_NAME,

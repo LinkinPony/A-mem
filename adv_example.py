@@ -27,7 +27,7 @@ OPENAI_API_KEY_ADV = os.getenv("OPENAI_API_KEY")
 
 def setup_components():
     logger.info("Setting up advanced example components...")
-    llm_logger_adv = LLMInteractionLogger(log_file="adv_llm_interactions.log", log_to_console=True)
+    llm_logger_adv = LLMInteractionLogger(log_file_path="logs/adv_llm_interactions.log", log_to_console=True)
 
     if LLM_BACKEND_ADV == "openai" and not OPENAI_API_KEY_ADV:
         logger.error("OPENAI_API_KEY is not set for advanced example. LLM features will be impacted.")

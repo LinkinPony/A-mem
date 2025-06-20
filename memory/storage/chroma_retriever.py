@@ -204,5 +204,3 @@ class ChromaRetriever(BaseRetriever):
             pass
         except Exception as e:
             logger.error(f"Error during ChromaRetriever shutdown: {e}", exc_info=True)
-
-EOL
